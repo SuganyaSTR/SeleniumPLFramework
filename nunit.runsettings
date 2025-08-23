@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <TestRunParameters>
+    <!-- NUnit3 parallel execution settings -->
+    <Parameter name="NumberOfTestWorkers" value="4" />
+    <Parameter name="ParallelScope" value="Fixtures" />
+    <Parameter name="LevelOfParallelism" value="4" />
+  </TestRunParameters>
+  
+  <RunConfiguration>
+    <!-- Reduced timeout for faster test execution -->
+        <!-- Maximum time in milliseconds to wait for a test run to complete (5 minutes) -->
+    <TestSessionTimeout>300000</TestSessionTimeout>
+    <!-- Path to Test Adapters -->
+    <TestAdaptersPaths>%USERPROFILE%\.nuget\packages</TestAdaptersPaths>
+    
+    <!-- Maximum number of cores to use - set to 1 for sequential execution -->
+    <MaxCpuCount>1</MaxCpuCount>
+    
+    <!-- Parallel execution disabled for sequential testing -->
+    <ParallelExecution>false</ParallelExecution>
+  </RunConfiguration>
+
+  <NUnit>
+    <!-- Disable parallel execution -->
+    <NumberOfTestWorkers>1</NumberOfTestWorkers>
+    
+    <!-- Disable parallel scope -->
+    <ParallelScope>None</ParallelScope>
+    
+    <!-- Seed for randomizing test execution order -->
+    <RandomSeed>1234</RandomSeed>
+    
+    <!-- Capture output and include it in the test results -->
+    <CaptureStandardOutput>true</CaptureStandardOutput>
+    
+    <!-- Stop test execution on first failure -->
+    <StopOnError>false</StopOnError>
+    
+    <!-- Process model for faster cleanup -->
+    <ProcessModel>InProcess</ProcessModel>
+    <DomainUsage>Single</DomainUsage>
+  </NUnit>
+</RunSettings>
