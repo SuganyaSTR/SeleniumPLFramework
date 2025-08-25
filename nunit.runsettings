@@ -2,9 +2,9 @@
 <RunSettings>
   <TestRunParameters>
     <!-- NUnit3 parallel execution settings -->
-    <Parameter name="NumberOfTestWorkers" value="4" />
-    <Parameter name="ParallelScope" value="Fixtures" />
-    <Parameter name="LevelOfParallelism" value="4" />
+    <Parameter name="NumberOfTestWorkers" value="1" />
+    <Parameter name="ParallelScope" value="None" />
+    <Parameter name="LevelOfParallelism" value="1" />
   </TestRunParameters>
   
   <RunConfiguration>

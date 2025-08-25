@@ -430,5 +430,122 @@ namespace SeleniumPL.Core
                 Logger.Debug("Password dialog handling completed with exception: {Message}", ex.Message);
             }
         }
+
+        /// <summary>
+        /// Enhanced method to handle cover page checkbox and text entry
+        /// </summary>
+        protected (bool CheckboxSelected, bool TextEntered) HandleCoverPageOptions(string coverPageText = "Test Cover Page Note - Automated Test")
+        {
+            Logger.Information("Handling cover page options: checkbox selection and text entry");
+            
+            bool checkboxSelected = false;
+            bool textEntered = false;
+
+            // Enhanced cover page checkbox locators
+            var checkboxLocators = new[]
+            {
+                By.XPath("//input[@type='checkbox'][contains(@id, 'coverpage') or contains(@name, 'coverpage')]"),
+                By.XPath("//input[@type='checkbox'][contains(@id, 'cover')]"),
+                By.XPath("//input[@type='checkbox'][contains(@id, 'CoverPage')]"),
+                By.XPath("//*[contains(text(), 'Cover page')]//input[@type='checkbox']"),
+                By.XPath("//label[contains(text(), 'Cover page')]/input[@type='checkbox']"),
+                By.XPath("//label[contains(text(), 'Cover page')]//input[@type='checkbox']"),
+                By.XPath("//span[contains(text(), 'Cover page')]/..//input[@type='checkbox']"),
+                By.XPath("//div[contains(text(), 'Cover page')]//input[@type='checkbox']"),
+                By.CssSelector("input[type='checkbox'][id*='cover'], input[type='checkbox'][name*='cover']")
+            };
+
+            // Try to find and select cover page checkbox
+            foreach (var locator in checkboxLocators)
+            {
+                try
+                {
+                    var checkbox = Wait.WaitForElementToBeClickable(locator, 3);
+                    if (checkbox != null && checkbox.Displayed && checkbox.Enabled)
+                    {
+                        if (!checkbox.Selected)
+                        {
+                            try
+                            {
+                                checkbox.Click();
+                            }
+                            catch (Exception)
+                            {
+                                // Fallback to JavaScript click
+                                ExecuteJavaScript("arguments[0].click();", checkbox);
+                            }
+                            Thread.Sleep(1000); // Wait for any dynamic content to load
+                        }
+                        Logger.Information("Successfully selected cover page checkbox using locator: {Locator}", locator);
+                        checkboxSelected = true;
+                        break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug("Cover page checkbox locator {Locator} failed: {Error}", locator, ex.Message);
+                }
+            }
+
+            // Enhanced cover page text field locators
+            var textLocators = new[]
+            {
+                By.XPath("//*[@id='coid_DdcLayoutCoverPageComment']"),
+                By.XPath("//textarea[contains(@id, 'CoverPage')]"),
+                By.XPath("//input[contains(@id, 'CoverPage')]"),
+                By.XPath("//textarea[contains(@name, 'cover')]"),
+                By.XPath("//textarea[contains(@id, 'coverpage')]"),
+                By.XPath("//input[contains(@name, 'coverpage')]"),
+                By.XPath("//textarea[contains(@placeholder, 'cover')]"),
+                By.XPath("//input[@type='text'][contains(@id, 'cover')]"),
+                By.XPath("//textarea[contains(@class, 'cover')]"),
+                By.CssSelector("textarea[id*='cover'], input[type='text'][id*='cover']"),
+                By.CssSelector("textarea[name*='cover'], input[type='text'][name*='cover']")
+            };
+
+            // Try to find and fill cover page text field
+            foreach (var locator in textLocators)
+            {
+                try
+                {
+                    var textField = Wait.WaitForElementToBeVisible(locator, 3);
+                    if (textField != null && textField.Displayed && textField.Enabled)
+                    {
+                        // Clear and enter text
+                        textField.Clear();
+                        Thread.Sleep(500);
+                        textField.SendKeys(coverPageText);
+                        Thread.Sleep(500);
+
+                        // Verify text was entered
+                        var enteredText = textField.GetAttribute("value");
+                        if (string.IsNullOrEmpty(enteredText))
+                        {
+                            enteredText = textField.Text;
+                        }
+
+                        if (!string.IsNullOrEmpty(enteredText) && enteredText.Contains(coverPageText.Substring(0, Math.Min(10, coverPageText.Length))))
+                        {
+                            Logger.Information("Successfully entered cover page text using locator: {Locator}. Text: '{Text}'", locator, enteredText);
+                            textEntered = true;
+                            break;
+                        }
+                        else
+                        {
+                            Logger.Warning("Cover page text field found but text verification failed using locator: {Locator}", locator);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug("Cover page text locator {Locator} failed: {Error}", locator, ex.Message);
+                }
+            }
+
+            Logger.Information("Cover page options handling completed. Checkbox: {CheckboxSelected}, Text: {TextEntered}", 
+                checkboxSelected, textEntered);
+
+            return (checkboxSelected, textEntered);
+        }
     }
 }

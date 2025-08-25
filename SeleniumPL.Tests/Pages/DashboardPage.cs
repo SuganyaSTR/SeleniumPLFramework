@@ -891,28 +891,133 @@ namespace SeleniumPL.Tests.Pages
         {
             try
             {
-                Logger.Information("Attempting to click sign out - first clicking profile icon to reveal dropdown");
+                Logger.Information("Attempting to click sign out - first checking for modal overlays");
                 
-                // Step 1: Click the profile icon to reveal the dropdown
+                // Step 1: Check and close any modal dialogs that might be blocking the UI
+                try
+                {
+                    // Close modal overlays if present
+                    var modalOverlays = new[]
+                    {
+                        By.Id("coid_lightboxOverlay"),
+                        By.CssSelector(".co_lightboxOverlay"),
+                        By.CssSelector("[class*='lightbox']"),
+                        By.CssSelector("[class*='modal']"),
+                        By.CssSelector("[class*='overlay']")
+                    };
+
+                    foreach (var overlayLocator in modalOverlays)
+                    {
+                        try
+                        {
+                            var overlay = Driver.FindElement(overlayLocator);
+                            if (overlay.Displayed)
+                            {
+                                Logger.Information("Found modal overlay, attempting to close it");
+                                
+                                // Try to find close button within the overlay
+                                var closeButtons = new[]
+                                {
+                                    By.CssSelector(".close"),
+                                    By.CssSelector("[class*='close']"),
+                                    By.XPath("//button[contains(text(), 'Close')]"),
+                                    By.XPath("//button[contains(text(), 'Cancel')]"),
+                                    By.XPath("//button[@type='button']"),
+                                    By.CssSelector("button[onclick*='close']")
+                                };
+
+                                bool modalClosed = false;
+                                foreach (var closeButtonLocator in closeButtons)
+                                {
+                                    try
+                                    {
+                                        var closeButton = overlay.FindElement(closeButtonLocator);
+                                        if (closeButton.Displayed && closeButton.Enabled)
+                                        {
+                                            Logger.Information("Clicking close button to dismiss modal");
+                                            closeButton.Click();
+                                            System.Threading.Thread.Sleep(1000);
+                                            modalClosed = true;
+                                            break;
+                                        }
+                                    }
+                                    catch { }
+                                }
+
+                                // If no close button found, try to click outside the modal or use escape key
+                                if (!modalClosed)
+                                {
+                                    try
+                                    {
+                                        Logger.Information("No close button found, trying to press Escape key");
+                                        Driver.FindElement(By.TagName("body")).SendKeys(OpenQA.Selenium.Keys.Escape);
+                                        System.Threading.Thread.Sleep(1000);
+                                    }
+                                    catch 
+                                    {
+                                        Logger.Information("Escape key failed, trying to click outside modal");
+                                        // Try clicking on the overlay itself to close it
+                                        try
+                                        {
+                                            overlay.Click();
+                                            System.Threading.Thread.Sleep(1000);
+                                        }
+                                        catch { }
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug("Modal overlay check completed: {Message}", ex.Message);
+                }
+
+                // Step 2: Now try to click the profile icon to reveal the dropdown
+                Logger.Information("Clicking profile icon to reveal sign out dropdown");
+                
                 try
                 {
                     var profileIcon = Driver.FindElement(ProfileSignOutIcon);
                     if (profileIcon.Displayed)
                     {
-                        Logger.Information("Clicking profile icon to reveal sign out dropdown");
-                        profileIcon.Click();
+                        // Use JavaScript click to avoid interception issues
+                        try
+                        {
+                            ((IJavaScriptExecutor)Driver).ExecuteScript("arguments[0].click();", profileIcon);
+                            Logger.Information("Profile icon clicked using JavaScript");
+                        }
+                        catch
+                        {
+                            // Fallback to regular click
+                            profileIcon.Click();
+                            Logger.Information("Profile icon clicked using regular click");
+                        }
                         
                         // Wait for dropdown to appear
                         System.Threading.Thread.Sleep(2000);
                         
-                        // Step 2: Now click the sign out button in the dropdown
+                        // Step 3: Now click the sign out button in the dropdown
                         try
                         {
                             var signOutButton = Driver.FindElement(SignOutButtonAfterProfileClick);
                             if (signOutButton.Displayed && signOutButton.Enabled)
                             {
                                 Logger.Information("Clicking Sign Out button in dropdown");
-                                signOutButton.Click();
+                                
+                                // Use JavaScript click for reliability
+                                try
+                                {
+                                    ((IJavaScriptExecutor)Driver).ExecuteScript("arguments[0].click();", signOutButton);
+                                    Logger.Information("Sign out button clicked using JavaScript");
+                                }
+                                catch
+                                {
+                                    signOutButton.Click();
+                                    Logger.Information("Sign out button clicked using regular click");
+                                }
                                 
                                 // Wait for logout to complete
                                 System.Threading.Thread.Sleep(3000);
@@ -929,26 +1034,140 @@ namespace SeleniumPL.Tests.Pages
                         catch (Exception ex)
                         {
                             Logger.Warning("❌ Could not find or click sign out button in dropdown: {Error}", ex.Message);
-                            return false;
+                            
+                            // Try alternative sign out methods
+                            return TryAlternativeSignOutMethods();
                         }
                     }
                     else
                     {
                         Logger.Warning("❌ Profile icon not visible");
-                        return false;
+                        return TryAlternativeSignOutMethods();
                     }
                 }
                 catch (Exception ex)
                 {
                     Logger.Warning("❌ Could not find or click profile icon: {Error}", ex.Message);
-                    return false;
+                    return TryAlternativeSignOutMethods();
                 }
             }
             catch (Exception ex)
             {
                 Logger.Error("Error during sign out process: {Error}", ex.Message);
-                return false;
+                return TryAlternativeSignOutMethods();
             }
+        }
+
+        /// <summary>
+        /// Try alternative sign out methods when the primary method fails
+        /// </summary>
+        /// <returns>True if any alternative method succeeded</returns>
+        private bool TryAlternativeSignOutMethods()
+        {
+            Logger.Information("Trying alternative sign out methods...");
+            
+            // Method 1: Direct URL navigation to sign out
+            try
+            {
+                Logger.Information("Trying direct URL navigation to sign out");
+                var currentUrl = Driver.Url;
+                var baseUrl = new Uri(currentUrl).GetLeftPart(UriPartial.Authority);
+                var signOutUrl = $"{baseUrl}/SignOff";
+                
+                Driver.Navigate().GoToUrl(signOutUrl);
+                System.Threading.Thread.Sleep(3000);
+                
+                if (Driver.Url.ToLower().Contains("signoff") || Driver.Url.ToLower().Contains("login"))
+                {
+                    Logger.Information("✅ Sign out successful via direct URL navigation");
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug("Direct URL sign out failed: {Error}", ex.Message);
+            }
+
+            // Method 2: Try to find any sign out link on the page
+            try
+            {
+                Logger.Information("Searching for any sign out link on the page");
+                
+                foreach (var locator in SignOutButtonLocators)
+                {
+                    try
+                    {
+                        var elements = Driver.FindElements(locator);
+                        foreach (var element in elements)
+                        {
+                            if (element.Displayed && element.Enabled)
+                            {
+                                Logger.Information("Found sign out element using locator: {Locator}", locator);
+                                
+                                try
+                                {
+                                    ((IJavaScriptExecutor)Driver).ExecuteScript("arguments[0].click();", element);
+                                    Logger.Information("✅ Sign out successful via alternative method");
+                                    System.Threading.Thread.Sleep(3000);
+                                    return true;
+                                }
+                                catch
+                                {
+                                    element.Click();
+                                    Logger.Information("✅ Sign out successful via alternative method");
+                                    System.Threading.Thread.Sleep(3000);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug("Alternative sign out search failed: {Error}", ex.Message);
+            }
+
+            // Method 3: JavaScript-based sign out
+            try
+            {
+                Logger.Information("Trying JavaScript-based sign out");
+                ((IJavaScriptExecutor)Driver).ExecuteScript(@"
+                    // Try to find and click sign out elements
+                    var signOutElements = document.querySelectorAll('a[href*=""signoff""], a[href*=""logout""], button[onclick*=""signout""], button[onclick*=""logout""]');
+                    for (var i = 0; i < signOutElements.length; i++) {
+                        if (signOutElements[i].offsetParent !== null) {
+                            signOutElements[i].click();
+                            return true;
+                        }
+                    }
+                    
+                    // Try to trigger sign out via common sign out patterns
+                    var links = document.querySelectorAll('a, button');
+                    for (var i = 0; i < links.length; i++) {
+                        var text = links[i].textContent || links[i].innerText || '';
+                        if (text.toLowerCase().includes('sign out') || text.toLowerCase().includes('logout')) {
+                            if (links[i].offsetParent !== null) {
+                                links[i].click();
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                ");
+                
+                System.Threading.Thread.Sleep(3000);
+                Logger.Information("✅ JavaScript sign out attempted");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug("JavaScript sign out failed: {Error}", ex.Message);
+            }
+
+            Logger.Warning("❌ All sign out methods failed");
+            return false;
         }
 
         /// <summary>
