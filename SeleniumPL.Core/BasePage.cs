@@ -10,12 +10,18 @@ namespace SeleniumPL.Core
         protected readonly IWebDriver Driver;
         protected readonly WaitHelper Wait;
         protected readonly ILogger Logger;
+        protected readonly StableElementInteractions StableInteractions;
+        protected readonly SmartWaitConditions SmartWaits;
+        protected readonly TestDiagnostics Diagnostics;
 
         protected BasePage(IWebDriver driver, ILogger? logger = null)
         {
             Driver = driver;
             Logger = logger ?? Log.Logger;
             Wait = new WaitHelper(driver, 10, Logger);
+            StableInteractions = new StableElementInteractions(driver, Wait, Logger);
+            SmartWaits = new SmartWaitConditions(driver, Logger);
+            Diagnostics = new TestDiagnostics(driver, Logger);
         }
 
         // Page properties
