@@ -20,6 +20,11 @@ namespace SeleniumPL.Tests
         protected TestUserManager UserManager { get; private set; } = null!;
         protected TestUser? CurrentTestUser { get; private set; }
         
+        // Enhanced test reporting
+        protected TestResultsReporter ResultsReporter { get; private set; } = null!;
+        protected TestExecutionDetails CurrentTestExecution { get; private set; } = null!;
+        protected TestDiagnostics TestDiagnostics { get; private set; } = null!;
+        
         // Retry mechanism properties
         private static readonly Dictionary<string, int> TestRetryCount = new Dictionary<string, int>();
         private const int MaxRetryAttempts = 2; // Maximum retry attempts per test
@@ -51,6 +56,12 @@ namespace SeleniumPL.Tests
             UserManager = new TestUserManager(Configuration);
             Logger.Information("Test User Manager initialized with {UserCount} users", UserManager.GetAvailableUserIds().Count);
 
+            // Initialize Results Reporter
+            var resultsPath = Configuration["TestSettings:TestResultsPath"] ?? "TestResults";
+            var reportsPath = Configuration["TestSettings:ReportsPath"] ?? "Reports";
+            ResultsReporter = new TestResultsReporter(Logger, resultsPath, reportsPath);
+            Logger.Information("Test Results Reporter initialized");
+
             // Create directories if they don't exist
             CreateDirectoriesIfNotExist();
         }
@@ -58,17 +69,53 @@ namespace SeleniumPL.Tests
         [SetUp]
         public void SetUp()
         {
-            Logger.Information("Starting test: {TestName}", TestContext.CurrentContext.Test.Name);
+            var testName = TestContext.CurrentContext.Test.Name;
+            var testClass = TestContext.CurrentContext.Test.ClassName ?? "Unknown";
+            var testCategory = string.Join(", ", TestContext.CurrentContext.Test.Properties["Category"]);
+            var testDescription = TestContext.CurrentContext.Test.Properties["Description"]?.FirstOrDefault()?.ToString() ?? "";
+            
+            Logger.Information("Starting test: {TestName}", testName);
+            
+            // Initialize test execution tracking
+            CurrentTestExecution = new TestExecutionDetails
+            {
+                TestName = testName,
+                TestClass = testClass,
+                TestCategory = testCategory,
+                TestDescription = testDescription,
+                StartTime = DateTime.Now,
+                TestSteps = new List<TestStep>(),
+                ConsoleOutput = new List<ConsoleLogEntry>(),
+                Attachments = new List<TestAttachment>(),
+                PerformanceMetrics = new Dictionary<string, object>(),
+                EnvironmentInfo = new Dictionary<string, object>
+                {
+                    ["Browser"] = Configuration["WebDriver:Browser"] ?? "chrome",
+                    ["OS"] = Environment.OSVersion.ToString(),
+                    ["MachineName"] = Environment.MachineName,
+                    ["UserName"] = Environment.UserName,
+                    ["TestStartTime"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+                }
+            };
+            
+            AddTestStep("Test Setup", "Initializing WebDriver and test environment");
             
             DriverManager = new WebDriverManager(Configuration, Logger);
             var browserType = Configuration["WebDriver:Browser"] ?? "chrome";
             Driver = DriverManager.CreateDriver(browserType);
+            
+            // Initialize Test Diagnostics
+            var screenshotPath = Configuration["TestSettings:ScreenshotPath"] ?? "Screenshots";
+            TestDiagnostics = new TestDiagnostics(Driver, Logger, screenshotPath);
+
+            AddTestStep("WebDriver Created", $"Browser: {browserType}");
 
             // Navigate to base URL if configured
             var baseUrl = Configuration["TestSettings:BaseUrl"];
             if (!string.IsNullOrEmpty(baseUrl))
             {
                 Driver.Navigate().GoToUrl(baseUrl);
+                AddTestStep("Navigation", $"Navigated to: {baseUrl}");
             }
         }
 
@@ -79,7 +126,82 @@ namespace SeleniumPL.Tests
             var testResult = TestContext.CurrentContext.Result.Outcome;
             var fullTestName = $"{TestContext.CurrentContext.Test.ClassName}.{testName}";
 
+            AddTestStep("Test Teardown", $"Test completed with result: {testResult}");
+            
+            // Complete test execution tracking
+            CurrentTestExecution.EndTime = DateTime.Now;
+            CurrentTestExecution.Result = testResult.ToString();
+            
+            if (testResult == NUnit.Framework.Interfaces.ResultState.Failure ||
+                testResult == NUnit.Framework.Interfaces.ResultState.Error)
+            {
+                CurrentTestExecution.ErrorMessage = TestContext.CurrentContext.Result.Message;
+                CurrentTestExecution.StackTrace = TestContext.CurrentContext.Result.StackTrace;
+                AddTestStep("Error Captured", $"Error: {CurrentTestExecution.ErrorMessage}");
+            }
+
             Logger.Information("Test completed: {TestName}, Result: {Result}", testName, testResult);
+
+            // Capture additional diagnostics on failure
+            if (testResult == NUnit.Framework.Interfaces.ResultState.Failure ||
+                testResult == NUnit.Framework.Interfaces.ResultState.Error)
+            {
+                try
+                {
+                    // Capture comprehensive diagnostics
+                    if (Driver != null && TestDiagnostics != null)
+                    {
+                        AddTestStep("Diagnostics", "Capturing failure diagnostics");
+                        
+                        // Take screenshot
+                        var screenshotPath = TestDiagnostics.CaptureScreenshot(testName, "Test Failure", true);
+                        if (!string.IsNullOrEmpty(screenshotPath))
+                        {
+                            CurrentTestExecution.Attachments?.Add(new TestAttachment
+                            {
+                                Type = "Screenshot",
+                                FilePath = screenshotPath,
+                                Description = "Screenshot on test failure"
+                            });
+                        }
+                        
+                        // Capture page source
+                        var pageSourcePath = TestDiagnostics.CapturePageSource(testName);
+                        if (!string.IsNullOrEmpty(pageSourcePath))
+                        {
+                            CurrentTestExecution.Attachments?.Add(new TestAttachment
+                            {
+                                Type = "PageSource",
+                                FilePath = pageSourcePath,
+                                Description = "Page source on test failure"
+                            });
+                        }
+                        
+                        // Capture browser logs
+                        TestDiagnostics.CaptureBrowserLogs(testName);
+                        
+                        // Capture environment info
+                        TestDiagnostics.CaptureEnvironmentInfo(testName);
+                        
+                        // Capture performance metrics
+                        TestDiagnostics.CapturePerformanceMetrics(testName);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning("Could not capture diagnostics: {Error}", ex.Message);
+                }
+            }
+
+            // Save test execution results
+            try
+            {
+                ResultsReporter.CaptureTestExecution(CurrentTestExecution);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("Could not save test execution results: {Error}", ex.Message);
+            }
 
             // Handle retry logic for failed tests
             if (testResult == NUnit.Framework.Interfaces.ResultState.Failure ||
@@ -164,7 +286,74 @@ namespace SeleniumPL.Tests
         public void OneTimeTearDown()
         {
             Logger.Information("Test session completed");
+            
+            // Generate comprehensive session report
+            try
+            {
+                ResultsReporter.GenerateSessionReport();
+                Logger.Information("Session report generated successfully");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("Could not generate session report: {Error}", ex.Message);
+            }
+            
             Log.CloseAndFlush();
+        }
+
+        // Helper method to add test steps for detailed tracking
+        protected void AddTestStep(string action, string details = "", string result = "")
+        {
+            try
+            {
+                CurrentTestExecution?.TestSteps?.Add(new TestStep
+                {
+                    Timestamp = DateTime.Now,
+                    Action = action,
+                    Details = details,
+                    Result = result
+                });
+                
+                Logger.Information("Test Step: {Action} - {Details}", action, details);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("Could not add test step: {Error}", ex.Message);
+            }
+        }
+
+        // Helper method to add console output
+        protected void AddConsoleOutput(string level, string message)
+        {
+            try
+            {
+                CurrentTestExecution?.ConsoleOutput?.Add(new ConsoleLogEntry
+                {
+                    Timestamp = DateTime.Now,
+                    Level = level,
+                    Message = message
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("Could not add console output: {Error}", ex.Message);
+            }
+        }
+
+        // Helper method to add performance metrics
+        protected void AddPerformanceMetric(string key, object value)
+        {
+            try
+            {
+                if (CurrentTestExecution?.PerformanceMetrics != null)
+                {
+                    CurrentTestExecution.PerformanceMetrics[key] = value;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("Could not add performance metric: {Error}", ex.Message);
+            }
         }
 
         protected void TakeScreenshot(string testName)
@@ -197,6 +386,7 @@ namespace SeleniumPL.Tests
             {
                 Configuration["TestSettings:ScreenshotPath"] ?? "Screenshots",
                 Configuration["TestSettings:ReportsPath"] ?? "Reports",
+                Configuration["TestSettings:TestResultsPath"] ?? "TestResults",
                 Path.GetDirectoryName(Configuration["Logging:LogFilePath"]) ?? "Logs"
             };
 
@@ -221,19 +411,22 @@ namespace SeleniumPL.Tests
             Thread.Sleep(TimeSpan.FromSeconds(seconds));
         }
 
-        // Intelligent wait helper methods for optimized test performance
+        // Intelligent wait helper methods for optimized test performance with step tracking
         protected IWebElement WaitForElementToBeClickable(By locator, int timeoutSeconds = 10)
         {
             try
             {
+                AddTestStep("Wait for Element", $"Waiting for element to be clickable: {locator}");
                 var wait = new OpenQA.Selenium.Support.UI.WebDriverWait(Driver, TimeSpan.FromSeconds(timeoutSeconds));
                 var element = wait.Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(locator));
                 Logger.Debug("Element is clickable: {Locator}", locator);
+                AddTestStep("Element Found", $"Element is clickable: {locator}", "Success");
                 return element;
             }
             catch (OpenQA.Selenium.WebDriverTimeoutException ex)
             {
                 Logger.Warning("Element not clickable within {Timeout} seconds: {Locator}", timeoutSeconds, locator);
+                AddTestStep("Element Wait Failed", $"Element not clickable: {locator}", "Failed");
                 throw new TimeoutException($"Element not clickable: {locator}", ex);
             }
         }
@@ -242,14 +435,17 @@ namespace SeleniumPL.Tests
         {
             try
             {
+                AddTestStep("Wait for Element", $"Waiting for element to be visible: {locator}");
                 var wait = new OpenQA.Selenium.Support.UI.WebDriverWait(Driver, TimeSpan.FromSeconds(timeoutSeconds));
                 var element = wait.Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(locator));
                 Logger.Debug("Element is visible: {Locator}", locator);
+                AddTestStep("Element Found", $"Element is visible: {locator}", "Success");
                 return element;
             }
             catch (OpenQA.Selenium.WebDriverTimeoutException ex)
             {
                 Logger.Warning("Element not visible within {Timeout} seconds: {Locator}", timeoutSeconds, locator);
+                AddTestStep("Element Wait Failed", $"Element not visible: {locator}", "Failed");
                 throw new TimeoutException($"Element not visible: {locator}", ex);
             }
         }
@@ -258,14 +454,17 @@ namespace SeleniumPL.Tests
         {
             try
             {
+                AddTestStep("Wait for Element", $"Waiting for element to disappear: {locator}");
                 var wait = new OpenQA.Selenium.Support.UI.WebDriverWait(Driver, TimeSpan.FromSeconds(timeoutSeconds));
                 wait.Until(SeleniumExtras.WaitHelpers.ExpectedConditions.InvisibilityOfElementLocated(locator));
                 Logger.Debug("Element disappeared: {Locator}", locator);
+                AddTestStep("Element Disappeared", $"Element is no longer visible: {locator}", "Success");
                 return true;
             }
             catch (OpenQA.Selenium.WebDriverTimeoutException)
             {
                 Logger.Debug("Element still visible after {Timeout} seconds: {Locator}", timeoutSeconds, locator);
+                AddTestStep("Element Still Visible", $"Element still visible: {locator}", "Warning");
                 return false;
             }
         }
@@ -274,13 +473,16 @@ namespace SeleniumPL.Tests
         {
             try
             {
+                AddTestStep("Page Load", "Waiting for page to fully load");
                 var wait = new OpenQA.Selenium.Support.UI.WebDriverWait(Driver, TimeSpan.FromSeconds(timeoutSeconds));
                 wait.Until(driver => ((IJavaScriptExecutor)driver).ExecuteScript("return document.readyState").Equals("complete"));
                 Logger.Debug("Page load completed");
+                AddTestStep("Page Load Complete", "Page has fully loaded", "Success");
             }
             catch (OpenQA.Selenium.WebDriverTimeoutException)
             {
                 Logger.Debug("Page load timeout after {Timeout} seconds, continuing anyway", timeoutSeconds);
+                AddTestStep("Page Load Timeout", $"Page load timeout after {timeoutSeconds} seconds", "Warning");
             }
         }
 
